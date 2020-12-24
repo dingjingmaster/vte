@@ -149,7 +149,22 @@ fdwalk(int (*cb)(void *data, int fd),
   int res = 0;
 
 #ifdef __linux__
-  /* Avoid use of opendir/closedir since these are not async-signal-safe. */
+
+  /* First, try close_range(CLOEXEC) which is faster than the methods
+   * below, and works even if /proc is not available.
+   */
+  errno = 0;
+  res = syscall(SYS_close_range, 0u, ~0u, CLOSE_RANGE_CLOEXEC);
+  if (res == 0)
+          return 0;
+  if (res == -1 &&
+      errno != ENOSYS /* old kernel */ &&
+      errno != EINVAL /* flags not supported */)
+          return res;
+
+  /* Fall back to iterating over /proc/self/fd.
+   * Avoid use of opendir/closedir since these are not async-signal-safe.
+   */
   int dir_fd = open ("/proc/self/fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (dir_fd >= 0)
     {

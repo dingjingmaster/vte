@@ -33,3 +33,19 @@ int fdwalk(int (*cb)(void* data, int fd),
 char* strchrnul(char const* s,
                 int c);
 #endif
+
+#ifdef __linux__
+
+#ifndef SYS_close_range
+#ifdef __NR_close_range
+#define SYS_close_range __NR_close_range
+#else
+#define SYS_close_range 436
+#endif
+#endif
+
+#ifndef CLOSE_RANGE_CLOEXEC
+#define CLOSE_RANGE_CLOEXEC (1u << 2)
+#endif
+
+#endif /* __linux__ */
