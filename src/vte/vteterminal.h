@@ -51,8 +51,10 @@ typedef struct _VteCharAttributes       VteCharAttributes;
  */
 struct _VteTerminal {
 	GtkWidget widget;
+#if _VTE_GTK == 3
         /*< private >*/
 	gpointer *_unused_padding[1]; /* FIXMEchpe: remove this field on the next ABI break */
+#endif
 };
 
 /**
@@ -396,9 +398,13 @@ void vte_terminal_get_cursor_position(VteTerminal *terminal,
 				      glong *column,
                                       glong *row) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
 
+#if _VTE_GTK == 3
+
 _VTE_PUBLIC
 char *vte_terminal_hyperlink_check_event(VteTerminal *terminal,
                                          GdkEvent *event) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) _VTE_GNUC_NONNULL(2) G_GNUC_MALLOC;
+
+#endif /* _VTE_GTK */
 
 /* Add a matching expression, returning the tag the widget assigns to that
  * expression. */
@@ -420,10 +426,13 @@ void vte_terminal_match_remove_all(VteTerminal *terminal) _VTE_CXX_NOEXCEPT _VTE
 /* Check if a given cell on the screen contains part of a matched string.  If
  * it does, return the string, and store the match tag in the optional tag
  * argument. */
+#if _VTE_GTK == 3
+
 _VTE_PUBLIC
 char *vte_terminal_match_check_event(VteTerminal *terminal,
                                      GdkEvent *event,
                                      int *tag) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) _VTE_GNUC_NONNULL(2) G_GNUC_MALLOC;
+
 _VTE_PUBLIC
 char **vte_terminal_event_check_regex_array(VteTerminal *terminal,
                                             GdkEvent *event,
@@ -438,6 +447,8 @@ gboolean vte_terminal_event_check_regex_simple(VteTerminal *terminal,
                                                gsize n_regexes,
                                                guint32 match_flags,
                                                char **matches) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) _VTE_GNUC_NONNULL(2);
+
+#endif /* _VTE_GTK */
 
 _VTE_PUBLIC
 void      vte_terminal_search_set_regex      (VteTerminal *terminal,

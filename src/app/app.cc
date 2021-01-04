@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "std-glue.hh"
+#include "cairo-glue.hh"
 #include "glib-glue.hh"
 #include "libc-glue.hh"
 #include "pango-glue.hh"
@@ -61,13 +62,11 @@ public:
         gboolean feed_stdin{false};
         gboolean icon_title{false};
         gboolean keep{false};
-        gboolean no_argb_visual{false};
         gboolean no_bidi{false};
         gboolean no_bold{false};
         gboolean no_builtin_dingus{false};
         gboolean no_context_menu{false};
         gboolean no_decorations{false};
-        gboolean no_double_buffer{false};
         gboolean no_fallback_scrolling{false};
         gboolean no_geometry_hints{false};
         gboolean no_hyperlink{false};
@@ -120,6 +119,11 @@ public:
         VteCursorShape cursor_shape{VTE_CURSOR_SHAPE_BLOCK};
         VteTextBlinkMode text_blink_mode{VTE_TEXT_BLINK_ALWAYS};
         vte::glib::RefPtr<GtkCssProvider> css{};
+
+#if VTE_GTK == 3
+        gboolean no_argb_visual{false};
+        gboolean no_double_buffer{false};
+#endif /* VTE_GTK == 3 */
 
         ~Options() {
                 g_clear_object(&background_pixbuf);
@@ -371,8 +375,12 @@ private:
                 Options* that = static_cast<Options*>(data);
 
                 auto css = vte::glib::take_ref(gtk_css_provider_new());
+#if VTE_GTK == 3
                 if (!gtk_css_provider_load_from_path(css.get(), value, error))
                     return false;
+#elif VTE_GTK == 4
+                gtk_css_provider_load_from_path(css.get(), value);
+#endif /* VTE_GKT */
 
                 that->css = std::move(css);
                 return true;
@@ -550,8 +558,6 @@ public:
                           "Enable the setting of the icon title", nullptr },
                         { "keep", 'k', 0, G_OPTION_ARG_NONE, &keep,
                           "Live on after the command exits", nullptr },
-                        { "no-argb-visual", 0, 0, G_OPTION_ARG_NONE, &no_argb_visual,
-                          "Don't use an ARGB visual", nullptr },
                         { "no-bidi", 0, 0, G_OPTION_ARG_NONE, &no_bidi,
                           "Disable BiDi", nullptr },
                         { "no-bold", 0, 0, G_OPTION_ARG_NONE, &no_bold,
@@ -562,8 +568,6 @@ public:
                           "Disable context menu", nullptr },
                         { "no-decorations", 0, 0, G_OPTION_ARG_NONE, &no_decorations,
                           "Disable window decorations", nullptr },
-                        { "no-double-buffer", '2', 0, G_OPTION_ARG_NONE, &no_double_buffer,
-                          "Disable double-buffering", nullptr },
                         { "no-fallback-scrolling", 0, 0, G_OPTION_ARG_NONE, &no_fallback_scrolling,
                           "Disable fallback scrolling", nullptr },
                         { "no-geometry-hints", 'G', 0, G_OPTION_ARG_NONE, &no_geometry_hints,
@@ -617,8 +621,6 @@ public:
                           nullptr, nullptr },
                         { "console", 'C', G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_NONE, &console,
                           nullptr, nullptr },
-                        { "double-buffer", '2', G_OPTION_FLAG_REVERSE | G_OPTION_FLAG_HIDDEN,
-                          G_OPTION_ARG_NONE, &no_double_buffer, nullptr, nullptr },
                         { "pty-flags", 0, G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING, &dummy_string,
                           nullptr, nullptr },
                         { "scrollbar-policy", 'P', G_OPTION_FLAG_HIDDEN, G_OPTION_ARG_STRING,
@@ -633,6 +635,15 @@ public:
 #endif
                         { "use-theme-colors", 0, 0, G_OPTION_ARG_NONE, &use_theme_colors,
                           "Use foreground and background colors from the gtk+ theme", nullptr },
+
+#if VTE_GTK == 3
+                        { "no-argb-visual", 0, 0, G_OPTION_ARG_NONE, &no_argb_visual,
+                          "Don't use an ARGB visual", nullptr },
+                        { "double-buffer", '2', G_OPTION_FLAG_REVERSE | G_OPTION_FLAG_HIDDEN,
+                          G_OPTION_ARG_NONE, &no_double_buffer, nullptr, nullptr },
+                        { "no-double-buffer", '2', 0, G_OPTION_ARG_NONE, &no_double_buffer,
+                          "Disable double-buffering", nullptr },
+#endif /* VTE_GTK == 3 */
                         { nullptr }
                 };
 
@@ -666,7 +677,9 @@ public:
                 g_option_group_add_entries(group, entries);
                 g_option_context_set_main_group(context.get(), group);
 
+#if VTE_GTK == 3
                 g_option_context_add_group(context.get(), gtk_get_option_group(true));
+#endif
 
                 bool rv = g_option_context_parse(context.get(), &argc, &argv, error);
 
@@ -676,6 +689,14 @@ public:
                         using std::swap;
                         swap(fg_color, bg_color);
                 }
+
+#if VTE_GTK == 4
+                if (rv && !gtk_init_check()) {
+                        g_set_error_literal(error, G_OPTION_ERROR, G_OPTION_ERROR_FAILED,
+                                            "Failed to initialise gtk+");
+                        rv = false;
+                }
+#endif /* VTE_GTK == 4 */
 
                 return rv;
         }
@@ -808,7 +829,11 @@ vteapp_search_popover_update_sensitivity(VteappSearchPopover* popover)
 static void
 vteapp_search_popover_update_regex(VteappSearchPopover* popover)
 {
-        char const* search_text = gtk_entry_get_text(GTK_ENTRY(popover->search_entry));
+#if VTE_GTK == 3
+        auto search_text = gtk_entry_get_text(GTK_ENTRY(popover->search_entry));
+#elif VTE_GTK == 4
+        auto search_text = gtk_editable_get_text(GTK_EDITABLE(popover->search_entry));
+#endif /* VTE_GTK */
         bool caseless = gtk_toggle_button_get_active(popover->match_case_checkbutton) == FALSE;
 
         char* pattern;
@@ -971,10 +996,18 @@ static GtkWidget*
 vteapp_search_popover_new(VteTerminal* terminal,
                           GtkWidget* relative_to)
 {
-        return reinterpret_cast<GtkWidget*>(g_object_new(VTEAPP_TYPE_SEARCH_POPOVER,
-                                                         "terminal", terminal,
-                                                         "relative-to", relative_to,
-                                                         nullptr));
+        auto popover = reinterpret_cast<GtkWidget*>(g_object_new(VTEAPP_TYPE_SEARCH_POPOVER,
+                                                                 "terminal", terminal,
+#if VTE_GTK == 3
+                                                                 "relative-to", relative_to,
+#endif
+                                                                 nullptr));
+
+#if VTE_GTK == 4
+        gtk_widget_set_parent(popover, relative_to);
+#endif
+
+        return popover;
 }
 
 /* terminal */
@@ -992,7 +1025,11 @@ typedef struct _VteappTerminalClass  VteappTerminalClass;
 struct _VteappTerminal {
         VteTerminal parent;
 
+        //#if VTE_GTK == 3
         cairo_pattern_t* background_pattern;
+        //#elif VTE_GTK == 4
+        //        GdkTexture* background_texture;
+        //#endif
         bool has_backdrop;
         bool use_backdrop;
 };
@@ -1012,35 +1049,57 @@ vteapp_terminal_realize(GtkWidget* widget)
 {
         GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->realize(widget);
 
-        VteappTerminal* terminal = VTEAPP_TERMINAL(widget);
-        if (options.background_pixbuf != nullptr) {
-                auto surface = gdk_cairo_surface_create_from_pixbuf(options.background_pixbuf,
-                                                                    0 /* take scale from window */,
-                                                                    gtk_widget_get_window(widget));
-                terminal->background_pattern = cairo_pattern_create_for_surface(surface);
-                cairo_surface_destroy(surface);
+        if (!options.background_pixbuf)
+                return;
 
-                cairo_pattern_set_extend(terminal->background_pattern, options.background_extend);
-        }
+        auto terminal = VTEAPP_TERMINAL(widget);
+
+#if VTE_GTK == 3
+        auto surface = vte::take_freeable
+                (gdk_cairo_surface_create_from_pixbuf(options.background_pixbuf,
+                                                      0 /* take scale from window */,
+                                                      gtk_widget_get_window(widget)));
+#elif VTE_GTK == 4
+        auto const width = gdk_pixbuf_get_width(options.background_pixbuf);
+        auto const height = gdk_pixbuf_get_height(options.background_pixbuf);
+        auto surface = vte::take_freeable(cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                                     width, height));
+        auto cr = vte::take_freeable(cairo_create(surface.get()));
+        gdk_cairo_set_source_pixbuf(cr.get(), options.background_pixbuf, 0, 0);
+        cairo_paint(cr.get());
+        cairo_surface_flush(surface.get()); // FIXME necessary?
+#endif
+        terminal->background_pattern = cairo_pattern_create_for_surface(surface.get());
+
+        cairo_pattern_set_extend(terminal->background_pattern, options.background_extend);
+
+
+        //#elif VTE_GTK == 4
+        //        terminal->background_texture = gdk_texture_new_for_pixbuf(options.background_pixbuf);
+        //#endif /* VTE_GTK */
 }
 
 static void
 vteapp_terminal_unrealize(GtkWidget* widget)
 {
-        VteappTerminal* terminal = VTEAPP_TERMINAL(widget);
+#if VTE_GTK == 3
+        auto terminal = VTEAPP_TERMINAL(widget);
+
         if (terminal->background_pattern != nullptr) {
                 cairo_pattern_destroy(terminal->background_pattern);
                 terminal->background_pattern = nullptr;
         }
+#endif /* VTE_GTK */
 
         GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->unrealize(widget);
 }
 
-static gboolean
-vteapp_terminal_draw(GtkWidget* widget,
-                     cairo_t* cr)
+static void
+vteapp_terminal_draw_background(GtkWidget* widget,
+                                cairo_t* cr)
 {
-        VteappTerminal* terminal = VTEAPP_TERMINAL(widget);
+        auto terminal = VTEAPP_TERMINAL(widget);
+
         if (terminal->background_pattern != nullptr) {
                 cairo_push_group(cr);
 
@@ -1063,8 +1122,28 @@ vteapp_terminal_draw(GtkWidget* widget,
                 cairo_paint_with_alpha(cr, options.get_alpha_bg_for_draw());
 
         }
+}
 
-        auto rv = GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->draw(widget, cr);
+#if VTE_GTK == 4
+
+static void
+vteapp_terminal_draw_background(GtkWidget* widget,
+                                GtkSnapshot* snapshot)
+{
+        auto grect = GRAPHENE_RECT_INIT(float(0), float(0),
+                                        float(gtk_widget_get_allocated_width(widget)),
+                                        float(gtk_widget_get_allocated_height(widget)));
+        auto cr = vte::take_freeable(gtk_snapshot_append_cairo(snapshot, &grect));
+        vteapp_terminal_draw_background(widget, cr.get());
+}
+
+#endif /* VTE_GTK  == 4 */
+
+static void
+vteapp_terminal_draw_backdrop(GtkWidget* widget,
+                              cairo_t* cr)
+{
+        auto terminal = VTEAPP_TERMINAL(widget);
 
         if (terminal->use_backdrop && terminal->has_backdrop) {
                 cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
@@ -1074,49 +1153,162 @@ vteapp_terminal_draw(GtkWidget* widget,
                                 gtk_widget_get_allocated_height(widget));
                 cairo_paint(cr);
         }
+}
+
+#if VTE_GTK == 4
+
+static void
+vteapp_terminal_draw_backdrop(GtkWidget* widget,
+                              GtkSnapshot* snapshot)
+{
+        auto grect = GRAPHENE_RECT_INIT(float(0), float(0),
+                                        float(gtk_widget_get_allocated_width(widget)),
+                                        float(gtk_widget_get_allocated_height(widget)));
+        auto cr = vte::take_freeable(gtk_snapshot_append_cairo(snapshot, &grect));
+        vteapp_terminal_draw_backdrop(widget, cr.get());
+}
+
+#endif /* VTE_GTK  == 4 */
+
+#if VTE_GTK == 3
+
+static gboolean
+vteapp_terminal_draw(GtkWidget* widget,
+                     cairo_t* cr)
+{
+        vteapp_terminal_draw_background(widget, cr);
+
+        auto const rv = GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->draw(widget, cr);
+
+        vteapp_terminal_draw_backdrop(widget, cr);
 
         return rv;
 }
 
-static auto dti(double d) -> unsigned { return CLAMP((d*255), 0, 255); }
+#endif /* VTE_GTK == 3 */
+
+static void
+vteapp_terminal_update_theme_colors(GtkWidget* widget)
+{
+        if (!options.use_theme_colors)
+                return;
+
+        auto terminal = VTEAPP_TERMINAL(widget);
+        auto context = gtk_widget_get_style_context(widget);
+
+#if VTE_GTK == 3
+        auto const flags = gtk_style_context_get_state(context);
+#endif
+
+        auto theme_fg = GdkRGBA{};
+        gtk_style_context_get_color(context,
+#if VTE_GTK == 3
+                                    flags,
+#endif
+                                    &theme_fg);
+
+        auto theme_bg = GdkRGBA{};
+#if VTE_GTK == 3
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
+        gtk_style_context_get_background_color(context, flags, &theme_bg);
+        G_GNUC_END_IGNORE_DEPRECATIONS;
+#elif VTE_GTK == 4
+        // FIXMEgtk4 "background-color" lookup always fails
+        if (!gtk_style_context_lookup_color(context, "text_view_bg", &theme_bg)) {
+                verbose_print("Failed to get theme background color\n");
+                return;
+        }
+#endif
+
+        auto dti = [](double d) -> unsigned { return std::clamp(unsigned(d*255), 0u, 255u); };
+
+        verbose_print("Theme colors: foreground is #%02X%02X%02X, background is #%02X%02X%02X\n",
+                      dti(theme_fg.red), dti(theme_fg.green), dti(theme_fg.blue),
+                      dti(theme_bg.red), dti(theme_bg.green), dti(theme_bg.blue));
+
+        theme_fg.alpha = 1.;
+        theme_bg.alpha = options.get_alpha_bg();
+        vte_terminal_set_colors(VTE_TERMINAL(terminal), &theme_fg, &theme_bg, nullptr, 0);
+}
+
+#if VTE_GTK == 3
 
 static void
 vteapp_terminal_style_updated(GtkWidget* widget)
 {
         GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->style_updated(widget);
 
-        auto context = gtk_widget_get_style_context(widget);
-        auto flags = gtk_style_context_get_state(context);
+        auto terminal = VTEAPP_TERMINAL(widget);
 
-        VteappTerminal* terminal = VTEAPP_TERMINAL(widget);
+        auto context = gtk_widget_get_style_context(widget);
+        auto const flags = gtk_style_context_get_state(context);
         terminal->has_backdrop = (flags & GTK_STATE_FLAG_BACKDROP) != 0;
 
-        if (options.use_theme_colors) {
-                auto theme_fg = GdkRGBA{};
-                gtk_style_context_get_color(context, flags, &theme_fg);
-                G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
-                auto theme_bg = GdkRGBA{};
-                gtk_style_context_get_background_color(context, flags, &theme_bg);
-                G_GNUC_END_IGNORE_DEPRECATIONS;
-
-                verbose_print("Theme colors: foreground is #%02X%02X%02X, background is #%02X%02X%02X\n",
-                              dti(theme_fg.red), dti(theme_fg.green), dti(theme_fg.blue),
-                              dti(theme_bg.red), dti(theme_bg.green), dti(theme_bg.blue));
-
-                theme_fg.alpha = 1.;
-                theme_bg.alpha = options.get_alpha_bg();
-                vte_terminal_set_colors(VTE_TERMINAL(terminal), &theme_fg, &theme_bg, nullptr, 0);
-        }
+        vteapp_terminal_update_theme_colors(widget);
 }
+
+#endif /* VTE_GTK == 3 */
+
+#if VTE_GTK == 4
+
+static void
+vteapp_terminal_snapshot(GtkWidget* widget,
+                         GtkSnapshot* snapshot_object)
+{
+        vteapp_terminal_draw_background(widget, snapshot_object);
+
+        GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->snapshot(widget, snapshot_object);
+
+        vteapp_terminal_draw_backdrop(widget, snapshot_object);
+}
+
+static void
+vteapp_terminal_css_changed(GtkWidget* widget,
+                            GtkCssStyleChange* change)
+{
+        GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->css_changed(widget, change);
+
+        vteapp_terminal_update_theme_colors(widget);
+}
+
+static void
+vteapp_terminal_state_flags_changed(GtkWidget* widget,
+                                    GtkStateFlags old_flags)
+{
+        GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->state_flags_changed(widget, old_flags);
+
+        auto terminal = VTEAPP_TERMINAL(widget);
+        auto const flags = gtk_widget_get_state_flags(widget);
+        terminal->has_backdrop = (flags & GTK_STATE_FLAG_BACKDROP) != 0;
+}
+
+static void
+vteapp_terminal_system_setting_changed(GtkWidget* widget,
+                                       GtkSystemSetting setting)
+{
+        GTK_WIDGET_CLASS(vteapp_terminal_parent_class)->system_setting_changed(widget, setting);
+
+        // FIXMEgtk4 find a way to update colours on theme change like gtk3 above
+}
+
+#endif /* VTE_GTK == 4 */
 
 static void
 vteapp_terminal_class_init(VteappTerminalClass *klass)
 {
-        GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+        auto widget_class = GTK_WIDGET_CLASS(klass);
         widget_class->realize = vteapp_terminal_realize;
         widget_class->unrealize = vteapp_terminal_unrealize;
+
+#if VTE_GTK == 3
         widget_class->draw = vteapp_terminal_draw;
         widget_class->style_updated = vteapp_terminal_style_updated;
+#elif VTE_GTK == 4
+        widget_class->snapshot = vteapp_terminal_snapshot;
+        widget_class->css_changed = vteapp_terminal_css_changed;
+        widget_class->state_flags_changed = vteapp_terminal_state_flags_changed;
+        widget_class->system_setting_changed = vteapp_terminal_system_setting_changed;
+#endif
 
         gtk_widget_class_set_css_name(widget_class, "vteapp-terminal");
 }
@@ -1165,11 +1357,8 @@ struct _VteappWindow {
         /* end */
 
         VteTerminal* terminal;
-        GtkClipboard* clipboard;
         GPid child_pid;
         GtkWidget* search_popover;
-
-        bool fullscreen{false};
 
         /* used for updating the geometry hints */
         int cached_cell_width{0};
@@ -1178,6 +1367,15 @@ struct _VteappWindow {
         int cached_chrome_height{0};
         int cached_csd_width{0};
         int cached_csd_height{0};
+
+#if VTE_GTK == 3
+        GtkClipboard* clipboard;
+        GdkWindowState window_state{GdkWindowState(0)};
+#endif
+#if VTE_GTK == 4
+        GdkClipboard* clipboard;
+        GdkToplevelState toplevel_state{GdkToplevelState(0)};
+#endif
 };
 
 struct _VteappWindowClass {
@@ -1221,6 +1419,7 @@ vteapp_window_add_dingus(VteappWindow* window,
 static void
 vteapp_window_update_geometry(VteappWindow* window)
 {
+#if VTE_GTK == 3
         GtkWidget* window_widget = GTK_WIDGET(window);
         GtkWidget* terminal_widget = GTK_WIDGET(window->terminal);
 
@@ -1301,18 +1500,43 @@ vteapp_window_update_geometry(VteappWindow* window)
                       window->cached_cell_width, window->cached_cell_height,
                       window->cached_chrome_width, window->cached_chrome_height,
                       window->cached_csd_width, window->cached_csd_height);
+#elif VTE_GTK == 4
+        // FIXMEgtk4 there appears to be no way to do this with gtk4 ? maybe go to X/wayland
+        // directly to set the geometry hints?
+#endif
 }
+
+#include <gdk/gdk.h>
 
 static void
 vteapp_window_resize(VteappWindow* window)
 {
-        /* Don't do this for maximised or tiled windows. */
-        auto win = gtk_widget_get_window(GTK_WIDGET(window));
-        if (win != nullptr &&
-            (gdk_window_get_state(win) & (GDK_WINDOW_STATE_MAXIMIZED |
-                                          GDK_WINDOW_STATE_FULLSCREEN |
-                                          GDK_WINDOW_STATE_TILED)) != 0)
+        /* Don't do this for fullscreened, maximised, or tiled windows. */
+#if VTE_GTK == 3
+        if (window->window_state & (GDK_WINDOW_STATE_MAXIMIZED |
+                                    GDK_WINDOW_STATE_FULLSCREEN |
+                                    GDK_WINDOW_STATE_TILED |
+#if GTK_CHECK_VERSION(3,22,23)
+                                    GDK_WINDOW_STATE_TOP_TILED |
+                                    GDK_WINDOW_STATE_BOTTOM_TILED |
+                                    GDK_WINDOW_STATE_LEFT_TILED |
+                                    GDK_WINDOW_STATE_RIGHT_TILED |
+#endif
+                                    0))
                 return;
+#elif VTE_GTK == 4
+        if (window->toplevel_state & (GDK_TOPLEVEL_STATE_MAXIMIZED |
+                                      GDK_TOPLEVEL_STATE_FULLSCREEN |
+                                      GDK_TOPLEVEL_STATE_TILED |
+                                      GDK_TOPLEVEL_STATE_TOP_TILED |
+                                      GDK_TOPLEVEL_STATE_BOTTOM_TILED |
+                                      GDK_TOPLEVEL_STATE_LEFT_TILED |
+                                      GDK_TOPLEVEL_STATE_RIGHT_TILED))
+                return;
+#endif /* VTE_GTK */
+
+#if VTE_GTK == 3
+        // FIXMEgtk4
 
         /* First, update the geometry hints, so that the cached_* members are up-to-date */
         vteapp_window_update_geometry(window);
@@ -1327,11 +1551,13 @@ vteapp_window_resize(VteappWindow* window)
                       columns, rows, pixel_width, pixel_height);
 
         gtk_window_resize(GTK_WINDOW(window), pixel_width, pixel_height);
+#endif /* VTE_GTK == 3 FIXMEgtk4 */
 }
 
 static void
 vteapp_window_parse_geometry(VteappWindow* window)
 {
+#if VTE_GTK == 3
         /* First update the geometry hints, so that gtk_window_parse_geometry()
          * knows the char width/height and base size increments.
          */
@@ -1376,6 +1602,9 @@ vteapp_window_parse_geometry(VteappWindow* window)
                         vteapp_window_resize(window);
                 }
         }
+#elif VTE_GTK == 4
+        // FIXMEgtk4 ????
+#endif /* VTE_GTK */
 }
 
 static void
@@ -1409,8 +1638,13 @@ window_spawn_cb(VteTerminal* terminal,
                 auto msg = vte::glib::take_string(g_strdup_printf("Spawning failed: %s", error->message));
                 if (options.keep)
                         vte_terminal_feed(window->terminal, msg.get(), -1);
-                else
+                else {
+#if VTE_GTK == 3
                         gtk_widget_destroy(GTK_WIDGET(window));
+#elif VTE_GTK == 4
+                        gtk_window_destroy(GTK_WINDOW(window));
+#endif
+                }
         }
 }
 
@@ -1568,16 +1802,34 @@ window_update_copy_sensitivity(VteappWindow* window)
 }
 
 static void
+window_update_fullscreen_state(VteappWindow* window)
+{
+#if VTE_GTK == 3
+        auto const fullscreen = (window->window_state & GDK_WINDOW_STATE_FULLSCREEN) != 0;
+#elif VTE_GTK == 4
+        auto const fullscreen = (window->toplevel_state & GDK_TOPLEVEL_STATE_FULLSCREEN) != 0;
+#endif
+        auto action = g_action_map_lookup_action(G_ACTION_MAP(window), "fullscreen");
+        g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_boolean (fullscreen));
+}
+
+static void
 window_update_paste_sensitivity(VteappWindow* window)
 {
+        bool can_paste = false;
+
+#if VTE_GTK == 3
         GdkAtom* targets;
         int n_targets;
 
-        bool can_paste = false;
         if (gtk_clipboard_wait_for_targets(window->clipboard, &targets, &n_targets)) {
                 can_paste = gtk_targets_include_text(targets, n_targets);
                 g_free(targets);
         }
+#elif VTE_GTK == 4
+        auto formats = gdk_clipboard_get_formats(window->clipboard);
+        can_paste = gdk_content_formats_contain_gtype(formats, G_TYPE_STRING);
+#endif /* VTE_GTK */
 
         auto action = g_action_map_lookup_action(G_ACTION_MAP(window), "paste");
         g_simple_action_set_enabled(G_SIMPLE_ACTION(action), can_paste);
@@ -1603,10 +1855,15 @@ window_action_copy_match_cb(GSimpleAction* action,
                             GVariant* parameter,
                             void* data)
 {
-        VteappWindow* window = VTEAPP_WINDOW(data);
-        gsize len;
-        char const* str = g_variant_get_string(parameter, &len);
+        auto window = VTEAPP_WINDOW(data);
+
+        auto len = size_t{};
+        auto str = g_variant_get_string(parameter, &len);
+#if VTE_GTK == 3
         gtk_clipboard_set_text(window->clipboard, str, len);
+#elif VTE_GTK == 4
+        gdk_clipboard_set_text(window->clipboard, str);
+#endif
 }
 
 static void
@@ -1623,16 +1880,23 @@ window_action_reset_cb(GSimpleAction* action,
                        GVariant* parameter,
                        void* data)
 {
-        VteappWindow* window = VTEAPP_WINDOW(data);
-        bool clear;
-        GdkModifierType modifiers;
+        auto window = VTEAPP_WINDOW(data);
+        auto clear = false;
 
         if (parameter != nullptr)
                 clear = g_variant_get_boolean(parameter);
-        else if (gtk_get_current_event_state(&modifiers))
+        else {
+                auto modifiers = GdkModifierType{};
+#if VTE_GTK == 3
+                if (!gtk_get_current_event_state(&modifiers))
+                        modifiers = GdkModifierType(0);
+#elif VTE_GTK == 4
+                // FIXMEgtk4!
+                modifiers = GdkModifierType(0);
+#endif
+
                 clear = (modifiers & GDK_CONTROL_MASK) != 0;
-        else
-                clear = false;
+        }
 
         vte_terminal_reset(window->terminal, true, clear);
 }
@@ -1645,7 +1909,6 @@ window_action_find_cb(GSimpleAction* action,
         VteappWindow* window = VTEAPP_WINDOW(data);
         gtk_toggle_button_set_active(window->find_button, true);
 }
-
 
 static void
 window_action_fullscreen_state_cb (GSimpleAction *action,
@@ -1665,6 +1928,7 @@ window_action_fullscreen_state_cb (GSimpleAction *action,
         /* The window-state-changed callback will update the action's actual state */
 }
 
+#if VTE_GTK == 3
 static bool
 vteapp_window_show_context_menu(VteappWindow* window,
                                 guint button,
@@ -1678,20 +1942,21 @@ vteapp_window_show_context_menu(VteappWindow* window,
         g_menu_append(menu, "_Copy", "win.copy::text");
         g_menu_append(menu, "Copy As _HTML", "win.copy::html");
 
-        if (event != nullptr) {
-                auto hyperlink = vte_terminal_hyperlink_check_event(window->terminal, event);
-                if (hyperlink != nullptr) {
-                        verbose_print("Hyperlink: %s\n", hyperlink);
-                        auto target = g_variant_new_string(hyperlink); /* floating */
+        if (event != nullptr)
+        {
+                auto hyperlink = vte::glib::take_string(vte_terminal_hyperlink_check_event(window->terminal, event));
+                if (hyperlink) {
+                        verbose_print("Hyperlink: %s\n", hyperlink.get());
+                        auto target = g_variant_new_string(hyperlink.get()); /* floating */
                         auto item = vte::glib::take_ref(g_menu_item_new("Copy _Hyperlink", nullptr));
                         g_menu_item_set_action_and_target_value(item.get(), "win.copy-match", target);
                         g_menu_append_item(menu, item.get());
                 }
 
-                auto match = vte_terminal_match_check_event(window->terminal, event, nullptr);
-                if (match != nullptr) {
-                        verbose_print("Match: %s\n", match);
-                        auto target = g_variant_new_string(match); /* floating */
+                auto match = vte::glib::take_string(vte_terminal_match_check_event(window->terminal, event, nullptr));
+                if (match) {
+                        verbose_print("Match: %s\n", match.get());
+                        auto target = g_variant_new_string(match.get()); /* floating */
                         auto item = vte::glib::take_ref(g_menu_item_new("Copy _Match", nullptr));
                         g_menu_item_set_action_and_target_value(item.get(), "win.copy-match", target);
                         g_menu_append_item(menu, item.get());
@@ -1725,15 +1990,14 @@ vteapp_window_show_context_menu(VteappWindow* window,
                         else
                                 verbose_print("%s match: %s\n", extra_pattern, extra_match);
                 }
-                g_free(hyperlink);
-                g_free(match);
                 g_free(extra_match);
                 g_free(extra_subst);
         }
 
         g_menu_append(menu, "_Paste", "win.paste");
 
-        if (window->fullscreen)
+        auto const fullscreen = (window->window_state & GDK_WINDOW_STATE_FULLSCREEN) != 0;
+        if (fullscreen)
                 g_menu_append(menu, "_Fullscreen", "win.fullscreen");
 
         auto popup = gtk_menu_new_from_model(G_MENU_MODEL(menu));
@@ -1744,13 +2008,23 @@ vteapp_window_show_context_menu(VteappWindow* window,
 
         return true;
 }
+#endif /* VTE_GTK */
+
+#if VTE_GTK == 3
 
 static gboolean
 window_popup_menu_cb(GtkWidget* widget,
                      VteappWindow* window)
 {
-        return vteapp_window_show_context_menu(window, 0, gtk_get_current_event_time(), nullptr);
+        auto const timestamp = gtk_get_current_event_time();
+
+        return vteapp_window_show_context_menu(window, 0, timestamp , nullptr);
 }
+// FIXMEgtk4
+
+#endif /* VTE_GTK == 3 */
+
+#if VTE_GTK == 3
 
 static gboolean
 window_button_press_cb(GtkWidget* widget,
@@ -1763,6 +2037,8 @@ window_button_press_cb(GtkWidget* widget,
         return vteapp_window_show_context_menu(window, event->button, event->time,
                                                reinterpret_cast<GdkEvent*>(event));
 }
+
+#endif /* VTE_GTK == 3 */
 
 static void
 window_cell_size_changed_cb(VteTerminal* term,
@@ -1815,8 +2091,14 @@ window_child_exited_cb(VteTerminal* term,
         if (options.keep)
                 return;
 
+#if VTE_GTK == 3
         gtk_widget_destroy(GTK_WIDGET(window));
+#elif VTE_GTK == 4
+        gtk_window_destroy(GTK_WINDOW(window));
+#endif
 }
+
+#if VTE_GTK == 3
 
 static void
 window_clipboard_owner_change_cb(GtkClipboard* clipboard,
@@ -1825,6 +2107,18 @@ window_clipboard_owner_change_cb(GtkClipboard* clipboard,
 {
         window_update_paste_sensitivity(window);
 }
+
+#elif VTE_GTK == 4
+
+static void
+window_clipboard_formats_notify_cb(GdkClipboard* clipboard,
+                                   GParamSpec* pspec,
+                                   VteappWindow* window)
+{
+        window_update_paste_sensitivity(window);
+}
+
+#endif /* VTE_GTK */
 
 static void
 window_decrease_font_size_cb(VteTerminal* terminal,
@@ -1847,7 +2141,12 @@ window_deiconify_window_cb(VteTerminal* terminal,
         if (!options.allow_window_ops)
                 return;
 
+#if VTE_GTK == 3
         gtk_window_deiconify(GTK_WINDOW(window));
+#elif VTE_GTK == 4
+        auto toplevel = GDK_TOPLEVEL(gtk_native_get_surface(GTK_NATIVE(window)));
+        gdk_toplevel_present(toplevel, nullptr); // FIXMEgtk4 nullptr not allowed
+#endif
 }
 
 static void
@@ -1857,26 +2156,25 @@ window_iconify_window_cb(VteTerminal* terminal,
         if (!options.allow_window_ops)
                 return;
 
+#if VTE_GTK == 3
         gtk_window_iconify(GTK_WINDOW(window));
-}
-
-static void
-window_icon_title_changed_cb(VteTerminal* terminal,
-                         VteappWindow* window)
-{
-        if (!options.icon_title)
-                return;
-
-        gdk_window_set_icon_name(gtk_widget_get_window(GTK_WIDGET(window)),
-                                 vte_terminal_get_icon_title(window->terminal));
+#elif VTE_GTK == 4
+        auto toplevel = GDK_TOPLEVEL(gtk_native_get_surface(GTK_NATIVE(window)));
+        gdk_toplevel_minimize(toplevel);
+#endif
 }
 
 static void
 window_window_title_changed_cb(VteTerminal* terminal,
                                VteappWindow* window)
 {
-        gtk_window_set_title(GTK_WINDOW(window),
-                             vte_terminal_get_window_title(window->terminal));
+        auto const title = vte_terminal_get_window_title(window->terminal);
+#if VTE_GTK == 3
+        gtk_window_set_title(GTK_WINDOW(window), title);
+#elif VTE_GTK == 4
+        auto toplevel = GDK_TOPLEVEL(gtk_native_get_surface(GTK_NATIVE(window)));
+        gdk_toplevel_set_title(toplevel, title);
+#endif
 }
 
 static void
@@ -1888,7 +2186,12 @@ window_lower_window_cb(VteTerminal* terminal,
         if (!gtk_widget_get_realized(GTK_WIDGET(window)))
                 return;
 
+#if VTE_GTK == 3
         gdk_window_lower(gtk_widget_get_window(GTK_WIDGET(window)));
+#elif VTE_GTK == 4
+        auto toplevel = GDK_TOPLEVEL(gtk_native_get_surface(GTK_NATIVE(window)));
+        gdk_toplevel_lower(toplevel);
+#endif
 }
 
 static void
@@ -1900,7 +2203,12 @@ window_raise_window_cb(VteTerminal* terminal,
         if (!gtk_widget_get_realized(GTK_WIDGET(window)))
                 return;
 
+#if VTE_GTK == 3
         gdk_window_raise(gtk_widget_get_window(GTK_WIDGET(window)));
+#elif VTE_GTK == 4
+        auto toplevel = GDK_TOPLEVEL(gtk_native_get_surface(GTK_NATIVE(window)));
+        gdk_toplevel_present(toplevel, nullptr); // FIXMEgtk4 gdk_toplevel_raise() doesn't exist??
+#endif
 }
 
 static void
@@ -1932,8 +2240,25 @@ window_move_window_cb(VteTerminal* terminal,
         if (!options.allow_window_ops)
                 return;
 
+#if VTE_GTK == 3
         gtk_window_move(GTK_WINDOW(window), x, y);
+#elif VTE_GTK == 4
+        // FIXMEgtk4
+#endif
 }
+
+#if VTE_GTK == 4
+
+static void
+window_toplevel_notify_state_cb(GdkToplevel* toplevel,
+                                GParamSpec* pspec,
+                                VteappWindow* window)
+{
+        window->toplevel_state = gdk_toplevel_get_state(toplevel);
+        window_update_fullscreen_state(window);
+}
+
+#endif /* VTE_GTK == 4 */
 
 static void
 window_notify_cb(GObject* object,
@@ -2044,10 +2369,19 @@ vteapp_window_constructed(GObject *object)
                 gtk_widget_set_margin_bottom(GTK_WIDGET(window->terminal), margin);
         }
 
-        gtk_range_set_adjustment(GTK_RANGE(window->scrollbar),
-                                 gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(window->terminal)));
+        auto vadj = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(window->terminal));
+#if VTE_GTK == 3
+        gtk_range_set_adjustment(GTK_RANGE(window->scrollbar), vadj);
+#elif VTE_GTK == 4
+        gtk_scrollbar_set_adjustment(GTK_SCROLLBAR(window->scrollbar), vadj);
+#endif
+
         if (options.no_scrollbar) {
+#if VTE_GTK == 3
                 gtk_widget_destroy(GTK_WIDGET(window->scrollbar));
+#elif VTE_GTK == 4
+                // FIXMEgtk4
+#endif
                 window->scrollbar = nullptr;
         }
 
@@ -2070,39 +2404,58 @@ vteapp_window_constructed(GObject *object)
         g_action_map_add_action(map, G_ACTION(action.get()));
         g_signal_connect(action.get(), "notify::state", G_CALLBACK(window_input_enabled_state_cb), window);
 
+#if VTE_GTK == 4
+        auto gear_popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(window->gear_button));
+        gtk_widget_set_halign(GTK_WIDGET(gear_popover), GTK_ALIGN_END);
+#endif
+
         /* Find */
         window->search_popover = vteapp_search_popover_new(window->terminal,
                                                            GTK_WIDGET(window->find_button));
+
         g_signal_connect(window->search_popover, "closed",
                          G_CALLBACK(window_search_popover_closed_cb), window);
         g_signal_connect(window->find_button, "toggled",
                          G_CALLBACK(window_find_button_toggled_cb), window);
 
         /* Clipboard */
+#if VTE_GTK == 3
         window->clipboard = gtk_widget_get_clipboard(GTK_WIDGET(window), GDK_SELECTION_CLIPBOARD);
         g_signal_connect(window->clipboard, "owner-change", G_CALLBACK(window_clipboard_owner_change_cb), window);
+#elif VTE_GTK == 4
+        window->clipboard = gtk_widget_get_clipboard(GTK_WIDGET(window));
+        g_signal_connect(window->clipboard, "notify::formats", G_CALLBACK(window_clipboard_formats_notify_cb), window);
+#endif /* VTE_GTK */
 
         /* Set ARGB visual */
         if (options.transparency_percent >= 0) {
+#if VTE_GTK == 3
                 if (!options.no_argb_visual) {
                         auto screen = gtk_widget_get_screen(GTK_WIDGET(window));
                         auto visual = gdk_screen_get_rgba_visual(screen);
                         if (visual != nullptr)
                                 gtk_widget_set_visual(GTK_WIDGET(window), visual);
-       }
+                }
 
                 /* Without this transparency doesn't work; see bug #729884. */
                 gtk_widget_set_app_paintable(GTK_WIDGET(window), true);
+
+#elif VTE_GTK == 4
+                // FIXMEgtk4
+#endif /* VTE_GTK == 3 */
         }
 
         /* Signals */
+#if VTE_GTK == 3
         g_signal_connect(window->terminal, "popup-menu", G_CALLBACK(window_popup_menu_cb), window);
         g_signal_connect(window->terminal, "button-press-event", G_CALLBACK(window_button_press_cb), window);
+#elif VTE_GTK == 4
+        // FIXMEgtk4
+#endif
         g_signal_connect(window->terminal, "char-size-changed", G_CALLBACK(window_cell_size_changed_cb), window);
         g_signal_connect(window->terminal, "child-exited", G_CALLBACK(window_child_exited_cb), window);
         g_signal_connect(window->terminal, "decrease-font-size", G_CALLBACK(window_decrease_font_size_cb), window);
         g_signal_connect(window->terminal, "deiconify-window", G_CALLBACK(window_deiconify_window_cb), window);
-        g_signal_connect(window->terminal, "icon-title-changed", G_CALLBACK(window_icon_title_changed_cb), window);
         g_signal_connect(window->terminal, "iconify-window", G_CALLBACK(window_iconify_window_cb), window);
         g_signal_connect(window->terminal, "increase-font-size", G_CALLBACK(window_increase_font_size_cb), window);
         g_signal_connect(window->terminal, "lower-window", G_CALLBACK(window_lower_window_cb), window);
@@ -2118,11 +2471,13 @@ vteapp_window_constructed(GObject *object)
                 g_signal_connect(window->terminal, "notify", G_CALLBACK(window_notify_cb), window);
 
         /* Settings */
+#if VTE_GTK == 3
         if (options.no_double_buffer) {
                 G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
                 gtk_widget_set_double_buffered(GTK_WIDGET(window->terminal), false);
                 G_GNUC_END_IGNORE_DEPRECATIONS;
         }
+#endif /* VTE_GTK == 3 */
 
         if (options.encoding != nullptr) {
                 auto error = vte::glib::Error{};
@@ -2183,6 +2538,8 @@ vteapp_window_constructed(GObject *object)
         /* Done! */
         gtk_grid_attach(GTK_GRID(window->window_grid), GTK_WIDGET(window->terminal),
                         0, 0, 1, 1);
+        gtk_widget_set_halign(GTK_WIDGET(window->terminal), GTK_ALIGN_FILL);
+        gtk_widget_set_valign(GTK_WIDGET(window->terminal), GTK_ALIGN_FILL);
         gtk_widget_show(GTK_WIDGET(window->terminal));
 
         window_update_paste_sensitivity(window);
@@ -2201,13 +2558,21 @@ vteapp_window_dispose(GObject *object)
 
         if (window->clipboard != nullptr) {
                 g_signal_handlers_disconnect_by_func(window->clipboard,
+#if VTE_GTK == 3
                                                      (void*)window_clipboard_owner_change_cb,
+#elif VTE_GTK == 4
+                                                     (void*)window_clipboard_formats_notify_cb,
+#endif
                                                      window);
                 window->clipboard = nullptr;
         }
 
         if (window->search_popover != nullptr) {
+#if VTE_GTK == 3
                 gtk_widget_destroy(window->search_popover);
+#elif VTE_GTK == 4
+                gtk_widget_unparent(window->search_popover); // this destroys the popover
+#endif /* VTE_GTK */
                 window->search_popover = nullptr;
         }
 
@@ -2222,7 +2587,34 @@ vteapp_window_realize(GtkWidget* widget)
         /* Now we can know the CSD size, and thus apply the geometry. */
         VteappWindow* window = VTEAPP_WINDOW(widget);
         verbose_print("VteappWindow::realize\n");
+
+#if VTE_GTK == 3
+        auto win = gtk_widget_get_window(GTK_WIDGET(window));
+        window->window_state = gdk_window_get_state(win);
+#elif VTE_GTK == 4
+        auto surface = gtk_native_get_surface(GTK_NATIVE(widget));
+        window->toplevel_state = gdk_toplevel_get_state(GDK_TOPLEVEL(surface));
+        g_signal_connect(surface, "notify::state",
+                         G_CALLBACK(window_toplevel_notify_state_cb), window);
+#endif
+
+        window_update_fullscreen_state(window);
+
         vteapp_window_resize(window);
+}
+
+static void
+vteapp_window_unrealize(GtkWidget* widget)
+{
+#if VTE_GTK == 4
+        auto window = VTEAPP_WINDOW(widget);
+        auto toplevel = gtk_native_get_surface(GTK_NATIVE(widget));
+        g_signal_handlers_disconnect_by_func(toplevel,
+                                             (void*)window_toplevel_notify_state_cb,
+                                             window);
+#endif
+
+        GTK_WIDGET_CLASS(vteapp_window_parent_class)->unrealize(widget);
 }
 
 static void
@@ -2235,6 +2627,8 @@ vteapp_window_show(GtkWidget* widget)
         verbose_print("VteappWindow::show\n");
         vteapp_window_resize(window);
 }
+
+#if VTE_GTK == 3
 
 static void
 vteapp_window_style_updated(GtkWidget* widget)
@@ -2251,17 +2645,16 @@ static gboolean
 vteapp_window_state_event (GtkWidget* widget,
                            GdkEventWindowState* event)
 {
-        VteappWindow* window = VTEAPP_WINDOW(widget);
+        auto window = VTEAPP_WINDOW(widget);
+        window->window_state = event->new_window_state;
 
-        if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
-                window->fullscreen = (event->new_window_state & GDK_WINDOW_STATE_FULLSCREEN) != 0;
-
-                auto action = reinterpret_cast<GSimpleAction*>(g_action_map_lookup_action(G_ACTION_MAP(window), "fullscreen"));
-                g_simple_action_set_state(action, g_variant_new_boolean (window->fullscreen));
-        }
+        if (event->changed_mask & GDK_WINDOW_STATE_FULLSCREEN)
+                window_update_fullscreen_state(window);
 
         return GTK_WIDGET_CLASS(vteapp_window_parent_class)->window_state_event(widget, event);
 }
+
+#endif /* VTE_GTK == 3 */
 
 static void
 vteapp_window_class_init(VteappWindowClass* klass)
@@ -2272,9 +2665,15 @@ vteapp_window_class_init(VteappWindowClass* klass)
 
         GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(klass);
         widget_class->realize = vteapp_window_realize;
+        widget_class->unrealize = vteapp_window_unrealize;
         widget_class->show = vteapp_window_show;
+
+#if VTE_GTK == 3
         widget_class->style_updated = vteapp_window_style_updated;
         widget_class->window_state_event = vteapp_window_state_event;
+#elif VTE_GTK == 4
+        // FIXMEgtk4 window state event
+#endif
 
         gtk_widget_class_set_template_from_resource(widget_class, "/org/gnome/vte/app/ui/window.ui");
         gtk_widget_class_set_css_name(widget_class, "vteapp-window");
@@ -2340,8 +2739,14 @@ app_action_close_cb(GSimpleAction* action,
 {
         GtkApplication* application = GTK_APPLICATION(data);
         auto window = gtk_application_get_active_window(application);
-        if (window != nullptr)
-                gtk_widget_destroy(GTK_WIDGET(window));
+        if (window == nullptr)
+                return;
+
+#if VTE_GTK == 3
+        gtk_widget_destroy(GTK_WIDGET(window));
+#elif VTE_GTK == 4
+        gtk_window_destroy(GTK_WINDOW(window));
+#endif
 }
 
 static gboolean
@@ -2381,16 +2786,24 @@ static void
 vteapp_application_init(VteappApplication* application)
 {
         g_object_set(gtk_settings_get_default(),
-                     "gtk-enable-mnemonics", FALSE,
                      "gtk-enable-accels", FALSE,
+#if VTE_GTK == 3
+                     "gtk-enable-mnemonics", FALSE,
                      /* Make gtk+ CSD not steal F10 from the terminal */
                      "gtk-menu-bar-accel", nullptr,
+#endif
                      nullptr);
 
         if (options.css) {
+#if VTE_GTK == 3
                 gtk_style_context_add_provider_for_screen(gdk_screen_get_default (),
                                                           GTK_STYLE_PROVIDER(options.css.get()),
                                                           GTK_STYLE_PROVIDER_PRIORITY_USER);
+#elif VTE_GTK == 4
+                gtk_style_context_add_provider_for_display(gdk_display_get_default (),
+                                                          GTK_STYLE_PROVIDER(options.css.get()),
+                                                          GTK_STYLE_PROVIDER_PRIORITY_USER);
+#endif
         }
 
         if (options.feed_stdin) {
@@ -2491,8 +2904,11 @@ main(int argc,
                return EXIT_SUCCESS;
        }
 
+#if VTE_GTK == 3
        if (options.debug)
                gdk_window_set_debug_updates(true);
+#endif /* VTE_GTK == 3 */
+
 #ifdef VTE_DEBUG
        if (options.test_mode) {
                vte_set_test_flags(VTE_TEST_FLAGS_ALL);

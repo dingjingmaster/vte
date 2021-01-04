@@ -63,6 +63,15 @@ scan_args = [
 
 glib_prefix = glib_dep.get_pkgconfig_variable('prefix')
 
+gdk_pixbuf_dep = dependency('gdk-pixbuf-2.0')
+gdk_pixbuf_prefix = gdk_pixbuf_dep.get_pkgconfig_variable('prefix')
+
+fixxref_args = [
+  '--extra-dir=' + (glib_prefix / gnome.gtkdoc_html_dir('glib')),
+  '--extra-dir=' + (glib_prefix / gnome.gtkdoc_html_dir('gio')),
+  '--extra-dir=' + (gdk_pixbuf_prefix / gnome.gtkdoc_html_dir('gdk-pixbuf')),
+]
+
 version_conf = configuration_data()
 version_conf.set('VERSION', vte_version)
 
@@ -75,28 +84,25 @@ content_files = configure_file(
 if get_option('gtk3')
   gtk3_prefix = gtk3_dep.get_pkgconfig_variable('prefix')
 
-  fixxref_args = [
+  fixxref_args_gtk3 = fixxref_args + [
     '--html-dir=' + (vte_prefix / gnome.gtkdoc_html_dir(vte_gtk3_api_name)),
-    '--extra-dir=' + (glib_prefix / gnome.gtkdoc_html_dir('glib')),
-    '--extra-dir=' + (glib_prefix / gnome.gtkdoc_html_dir('gio')),
     '--extra-dir=' + (gtk3_prefix / gnome.gtkdoc_html_dir('gdk')),
-    '--extra-dir=' + (gtk3_prefix / gnome.gtkdoc_html_dir('gdk-pixbuf')),
     '--extra-dir=' + (gtk3_prefix / gnome.gtkdoc_html_dir('gtk')),
   ]
 
   gnome.gtkdoc(
-    'vte',
+    'vte-gtk3',
     main_xml: 'vte-docs.xml',
     module_version: vte_api_version,
     src_dir: [src_inc, vte_inc],
     ignore_headers: private_headers,
     include_directories: top_inc,
     dependencies: libvte_gtk3_dep,
-    c_args: '-DVTE_COMPILATION',
+    c_args: ['-DVTE_COMPILATION',],
     namespace: 'vte',
     scan_args: scan_args,
     mkdb_args: '--source-suffixes=h,hh,c,cc',
-    fixxref_args: fixxref_args,
+    fixxref_args: fixxref_args_gtk3,
     gobject_typesfile: 'vte.types',
     content_files: content_files,
     install: true,
@@ -104,5 +110,29 @@ if get_option('gtk3')
 endif
 
 if get_option('gtk4')
-  assert(false, 'not yet supported')
+  gtk4_prefix = gtk4_dep.get_pkgconfig_variable('prefix')
+
+  fixxref_args_gtk4 = fixxref_args + [
+    '--html-dir=' + (vte_prefix / gnome.gtkdoc_html_dir(vte_gtk4_api_name)),
+    '--extra-dir=' + (gtk4_prefix / gnome.gtkdoc_html_dir('gdk')),
+    '--extra-dir=' + (gtk4_prefix / gnome.gtkdoc_html_dir('gtk')),
+  ]
+
+  gnome.gtkdoc(
+    'vte-gtk4',
+    main_xml: 'vte-docs.xml',
+    module_version: vte_api_version,
+    src_dir: [src_inc, vte_inc,],
+    ignore_headers: private_headers,
+    include_directories: top_inc,
+    dependencies: libvte_gtk4_dep,
+    c_args: ['-DVTE_COMPILATION',],
+    namespace: 'vte',
+    scan_args: scan_args,
+    mkdb_args: '--source-suffixes=h,hh,c,cc',
+    fixxref_args: fixxref_args_gtk4,
+    gobject_typesfile: 'vte.types',
+    content_files: content_files,
+    install: true,
+  )
 endif

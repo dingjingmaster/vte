@@ -11,26 +11,38 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
+ * You should have received a copy of the GNU Lesser General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #pragma once
 
+#include <cairo.h>
+#include <graphene.h>
+
 #include "std-glue.hh"
 
-namespace vte::gtk {
+namespace vte::graphene {
 
-} // namespace vte::gtk
+inline constexpr auto
+make_rect(int x,
+          int y,
+          int width,
+          int height)
+{
+        return GRAPHENE_RECT_INIT(float(x), float(y), float(width), float(height));
+}
+
+inline constexpr auto
+make_rect(cairo_rectangle_int_t const* rect)
+{
+        return make_rect(rect->x, rect->y, rect->width, rect->height);
+}
+
+} // namespace vte::graphene
 
 namespace vte {
 
-#if VTE_GTK == 3
-VTE_DECLARE_FREEABLE(GtkTargetList, gtk_target_list_unref);
-#endif /* VTE_GTK == 3 */
+// VTE_DECLARE_FREEABLE(graphene_rect_t, graphene_rect_free);
 
-#if VTE_GTK == 4
-VTE_DECLARE_FREEABLE(GdkContentFormats, gdk_content_formats_unref);
-#endif /* VTE_GTK == 4 */
-
-} // namespace vte
+} // namespace vte::cairo

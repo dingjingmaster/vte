@@ -46,17 +46,21 @@ void vte_terminal_match_set_cursor(VteTerminal *terminal,
                                    int tag,
                                    GdkCursor *cursor) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
 
+#if _VTE_GTK == 3
 _VTE_DEPRECATED
 _VTE_PUBLIC
 void vte_terminal_match_set_cursor_type(VteTerminal *terminal,
 					int tag,
                                         GdkCursorType cursor_type) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
+#endif
 
 _VTE_DEPRECATED
 _VTE_PUBLIC
 char *vte_terminal_match_check(VteTerminal *terminal,
 			       glong column, glong row,
 			       int *tag) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) G_GNUC_MALLOC;
+
+#if _VTE_GTK == 3
 
 _VTE_DEPRECATED
 _VTE_PUBLIC
@@ -66,6 +70,8 @@ gboolean vte_terminal_event_check_gregex_simple(VteTerminal *terminal,
                                                 gsize n_regexes,
                                                 GRegexMatchFlags match_flags,
                                                 char **matches) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) _VTE_GNUC_NONNULL(2);
+
+#endif /* _VTE_GTK == 3 */
 
 _VTE_DEPRECATED
 _VTE_PUBLIC
@@ -99,6 +105,8 @@ _VTE_DEPRECATED
 _VTE_PUBLIC
 void vte_terminal_copy_clipboard(VteTerminal *terminal) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1);
 
+#if _VTE_GTK == 3
+
 _VTE_DEPRECATED
 _VTE_PUBLIC
 void vte_terminal_get_geometry_hints(VteTerminal *terminal,
@@ -110,6 +118,8 @@ _VTE_DEPRECATED
 _VTE_PUBLIC
 void vte_terminal_set_geometry_hints_for_window(VteTerminal *terminal,
                                                 GtkWindow *window) _VTE_CXX_NOEXCEPT _VTE_GNUC_NONNULL(1) _VTE_GNUC_NONNULL(2);
+
+#endif /* _VTE_GTK == 3 */
 
 _VTE_DEPRECATED
 _VTE_PUBLIC
